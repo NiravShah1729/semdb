@@ -1,10 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"net"
+	"io"
+
+	"github.com/NiravShah1729/semdb/protocol"
 )
 
 func main() {
@@ -31,23 +33,28 @@ func main() {
 func handleConnection(conn net.Conn){
 	defer conn.Close()
 
-	scanner := bufio.NewScanner(conn)
+	r := protocol.NewReader(conn)
 
-	remoteAddr := conn.RemoteAddr().String()
-	for scanner.Scan() {
-		text := scanner.Text()
+	for {
+		// 1. Parse incoming RESP command using your Reader
+		val, err := r.Read()
+		if err != nil {
+			if err == io.EOF {
+				fmt.Println("Client disconnected.")
+				return
+			}
+			fmt.Println("Read error:", err)
+			return
+		}
 
-		//echo 
-		_,err := fmt.Fprintf(conn,"Echo: %s\n",text)
-		if err != nil{
-			log.Println("Counld not write back to the client")
+		// Print what your parser extracted in the server console
+		fmt.Printf("Received: %s\n", val)
+
+		// 2. Send a raw RESP response back over the TCP socket
+		_, err = conn.Write([]byte("+PONG\r\n"))
+		if err != nil {
+			fmt.Println("Write error:", err)
 			return
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		log.Print("Error reading from client")
-	}
-
-	fmt.Printf("Client disconnected: %s\n",remoteAddr)
 } 
