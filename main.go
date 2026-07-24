@@ -2,41 +2,44 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
-	"io"
+	"strings"
 
 	"github.com/NiravShah1729/semdb/protocol"
 )
 
 func main() {
-	listener, err := net.Listen("tcp",":8080")
-
+	port := ":8080"
+	listener, err := net.Listen("tcp", port)
 	if err != nil {
-		log.Fatalf("Failed to start the server: %v",err)
+		log.Fatalf("Failed to start the server: %v", err)
 	}
-
 	defer listener.Close()
-	fmt.Println("Echo server listning...")
+
+	fmt.Printf("Echo server listening on %s...\n", port)
 
 	for {
-		conn,err := listener.Accept()
-		fmt.Printf("This is what conn looks like %v",conn)
+		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("Failed to accept connection %v",err)
+			log.Printf("Failed to accept connection: %v\n", err)
+			continue
 		}
 
+		fmt.Printf("Client connected from %s\n", conn.RemoteAddr())
 		go handleConnection(conn)
 	}
 }
 
-func handleConnection(conn net.Conn){
+func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	r := protocol.NewReader(conn)
+	w := protocol.NewWriter(conn)
 
 	for {
-		// 1. Parse incoming RESP command using your Reader
+		// 1. Read and parse incoming RESP message
 		val, err := r.Read()
 		if err != nil {
 			if err == io.EOF {
@@ -47,14 +50,38 @@ func handleConnection(conn net.Conn){
 			return
 		}
 
-		// Print what your parser extracted in the server console
 		fmt.Printf("Received: %s\n", val)
 
-		// 2. Send a raw RESP response back over the TCP socket
-		_, err = conn.Write([]byte("+PONG\r\n"))
-		if err != nil {
+		// 2. Prepare the response Value
+		var response protocol.Value
+
+		// Check if the payload is an Array with "PING" as the first argument
+		if val.Type == protocol.TypeArray && len(val.Array) > 0 {
+			cmd := strings.ToUpper(string(val.Array[0].Bulk))
+			if cmd == "PING" {
+				response = protocol.Value{
+					Type: protocol.TypeSimpleString,
+					Str:  "PONG",
+				}
+			} else {
+				// Echo back the received Array
+				response = val
+			}
+		} else if val.Type == protocol.TypeSimpleString && strings.ToUpper(val.Str) == "PING" {
+			// Handle simple string +PING
+			response = protocol.Value{
+				Type: protocol.TypeSimpleString,
+				Str:  "PONG",
+			}
+		} else {
+			// Echo back any other parsed Value struct as-is
+			response = val
+		}
+
+		// 3. Serialize and write the response using protocol.Writer
+		if err := w.Write(response); err != nil {
 			fmt.Println("Write error:", err)
 			return
 		}
 	}
-} 
+}
