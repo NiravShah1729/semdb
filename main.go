@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -8,80 +9,158 @@ import (
 	"strings"
 
 	"github.com/NiravShah1729/semdb/protocol"
+	"github.com/NiravShah1729/semdb/store"
 )
 
 func main() {
-	port := ":8080"
-	listener, err := net.Listen("tcp", port)
-	if err != nil {
-		log.Fatalf("Failed to start the server: %v", err)
+	kvStore := store.NewStore()
+
+	listener,err := net.Listen("tcp",":8080")
+	if err != nil{
+		log.Fatalf("Failed to bind to port 8080: %v",err)
 	}
 	defer listener.Close()
 
-	fmt.Printf("Echo server listening on %s...\n", port)
+	log.Println("Server listening on 8080")
 
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Printf("Failed to accept connection: %v\n", err)
+		conn,err := listener.Accept()
+
+		if err != nil{
+			log.Printf("Error accepting connection: %v",err)
 			continue
 		}
-
-		fmt.Printf("Client connected from %s\n", conn.RemoteAddr())
-		go handleConnection(conn)
+		go handleConnection(conn,kvStore)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, kv *store.Store){
 	defer conn.Close()
 
-	r := protocol.NewReader(conn)
-	w := protocol.NewWriter(conn)
+	writer := protocol.NewWriter(conn)
+	reader := protocol.NewReader(conn)
 
 	for {
-		// 1. Read and parse incoming RESP message
-		val, err := r.Read()
+		val,err := reader.Read()
 		if err != nil {
-			if err == io.EOF {
-				fmt.Println("Client disconnected.")
+			if errors.Is(err, io.EOF) {
 				return
 			}
-			fmt.Println("Read error:", err)
+			log.Printf("Connection read error:%v",err)
 			return
 		}
 
-		fmt.Printf("Received: %s\n", val)
+		if val.Type != protocol.TypeArray {
+			writer.Write(protocol.Value{
+				Type: protocol.TypeError,
+				Str: "Err command must be a RESP array",
+			})
+			continue
+		}
 
-		// 2. Prepare the response Value
-		var response protocol.Value
+		if len(val.Array) == 0{
+			writer.Write(protocol.Value{
+				Type: protocol.TypeArray,
+				Str: "Err empty command",
+			})
+			continue
+		}
 
-		// Check if the payload is an Array with "PING" as the first argument
-		if val.Type == protocol.TypeArray && len(val.Array) > 0 {
-			cmd := strings.ToUpper(string(val.Array[0].Bulk))
-			if cmd == "PING" {
-				response = protocol.Value{
-					Type: protocol.TypeSimpleString,
-					Str:  "PONG",
-				}
-			} else {
-				// Echo back the received Array
-				response = val
+		cmd := strings.ToUpper(val.Array[0].String())
+		args := val.Array[1:]
+
+		switch cmd {
+		case "PING":
+			if len(args) > 0 {
+				writer.Write(protocol.Value{
+					Type: protocol.TypeBulkString,
+					Bulk: []byte(args[0].String()),
+				})
+			}else{
+				writer.Write(protocol.Value{
+					Type :protocol.TypeSimpleString,
+					Str: "PONG",
+ 				})
 			}
-		} else if val.Type == protocol.TypeSimpleString && strings.ToUpper(val.Str) == "PING" {
-			// Handle simple string +PING
-			response = protocol.Value{
+		case "SET":
+			if len(args) < 2{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR wrong number of arguments for set command",
+				})
+				continue
+			}
+			key := args[0].String()
+			val := args[1].String()
+			kv.Set(key,val)
+			writer.Write(protocol.Value{
 				Type: protocol.TypeSimpleString,
-				Str:  "PONG",
+				Str: "OK",
+			})
+		case "GET":
+			if len(args) < 1{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR wrong number of arguments for get command",
+				})
+				continue
 			}
-		} else {
-			// Echo back any other parsed Value struct as-is
-			response = val
-		}
+			key := args[0].String()
+			res,ok := kv.Get(key)
+			if !ok {
+				writer.Write(protocol.Value{
+					Type: protocol.TypeBulkString,
+					IsNull: true,
+				})
+			}else{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeBulkString,
+					Bulk: []byte(res),
+				})
+			}
+		case "EXISTS":
+			if len(args) < 1 {
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR wrong number of arguments for exists command",
+				})
+				continue
+			}
+			keys := make([]string,len(args))
+			for i,arg := range args {
+				keys[i] = arg.String()
+			}
 
-		// 3. Serialize and write the response using protocol.Writer
-		if err := w.Write(response); err != nil {
-			fmt.Println("Write error:", err)
-			return
+			count := kv.Exists(keys...)
+			writer.Write(protocol.Value{
+				Type: protocol.TypeInteger,
+				Num: int64(count),
+			})
+		case "DEL":
+			if len(args) < 1 {
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR wrong number of arguments for delete command",
+				})
+				continue
+			}
+			keys := make([]string,len(args))
+			for i,arg := range args {
+				keys[i] = arg.String()
+			}
+
+			count := kv.Del(keys...)
+			writer.Write(protocol.Value{
+				Type: protocol.TypeInteger,
+				Num: int64(count),
+			})
+		default:
+			writer.Write(protocol.Value{
+				Type: protocol.TypeArray,
+				Str: fmt.Sprintf("ERR unknown command %s",cmd),
+			})
 		}
+	
+
 	}
 }

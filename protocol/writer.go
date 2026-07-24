@@ -25,7 +25,7 @@ func (w *Writer) Write(v Value) error {
 	case TypeInteger:
 		_,err = w.writer.WriteString(":" + strconv.FormatInt(v.Num, 10) + "\r\n")
 	case TypeError:
-		_,err = w.writer.WriteString("+" + v.Str + "\r\n")
+		_,err = w.writer.WriteString("-" + v.Str + "\r\n")
 	case TypeBulkString:
 		if v.IsNull {
 			_,err = w.writer.WriteString("$-1\r\n")
