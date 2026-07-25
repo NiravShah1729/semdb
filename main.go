@@ -6,7 +6,9 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/NiravShah1729/semdb/protocol"
 	"github.com/NiravShah1729/semdb/store"
@@ -14,6 +16,7 @@ import (
 
 func main() {
 	kvStore := store.NewStore()
+	go kvStore.StartActiveEviction()
 
 	listener,err := net.Listen("tcp",":8080")
 	if err != nil{
@@ -92,7 +95,7 @@ func handleConnection(conn net.Conn, kv *store.Store){
 			}
 			key := args[0].String()
 			val := args[1].String()
-			kv.Set(key,val)
+			kv.Set(key,val,0)
 			writer.Write(protocol.Value{
 				Type: protocol.TypeSimpleString,
 				Str: "OK",
@@ -154,11 +157,56 @@ func handleConnection(conn net.Conn, kv *store.Store){
 				Type: protocol.TypeInteger,
 				Num: int64(count),
 			})
+		case "EXPIRE":
+			if len(args) < 2 {
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR wrong number of arguments",
+				})
+				continue
+			}
+			key := args[0].String()
+			sec,err := strconv.Atoi(args[1].String())
+			if err != nil {
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR wrong type of arguments",
+				})
+				continue
+			}
+			ok := kv.Expire(key,time.Duration(sec)*time.Second)
+			if ok{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeInteger,
+					Num: 1,
+				})
+			}else{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeInteger,
+					Num: 0,
+				})
+			}
+		case "TTL":
+			if len(args) < 1{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR wrong number of arguments",
+				})
+				continue
+			}
+			key := args[0].String()
+			ttl := kv.TTL(key)
+			writer.Write(protocol.Value{
+				Type: protocol.TypeInteger,
+				Num : ttl,
+			})
+
 		default:
 			writer.Write(protocol.Value{
 				Type: protocol.TypeArray,
 				Str: fmt.Sprintf("ERR unknown command %s",cmd),
 			})
+
 		}
 	
 
