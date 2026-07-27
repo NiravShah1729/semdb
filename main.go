@@ -28,6 +28,7 @@ func main() {
 
 	for {
 		conn,err := listener.Accept()
+		fmt.Println("Client connected")
 
 		if err != nil{
 			log.Printf("Error accepting connection: %v",err)
@@ -73,6 +74,11 @@ func handleConnection(conn net.Conn, kv *store.Store){
 		args := val.Array[1:]
 
 		switch cmd {
+		case "CLIENT":
+    		writer.Write(protocol.Value{
+        		Type: protocol.TypeSimpleString,
+        		Str:  "OK",
+    		})
 		case "PING":
 			if len(args) > 0 {
 				writer.Write(protocol.Value{
@@ -285,9 +291,15 @@ func handleConnection(conn net.Conn, kv *store.Store){
 				Type:  protocol.TypeArray,
 				Array: items,
 			})
+		case "CONFIG", "COMMAND", "SELECT":
 			writer.Write(protocol.Value{
-				Type: protocol.TypeArray,
-				Str: fmt.Sprintf("ERR unknown command %s",cmd),
+				Type: protocol.TypeSimpleString,
+				Str:  "OK",
+			})
+		default:
+			writer.Write(protocol.Value{
+				Type: protocol.TypeError,
+				Str:  fmt.Sprintf("ERR unknown command '%s'", cmd),
 			})
 		}
 	
