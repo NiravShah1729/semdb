@@ -8,6 +8,7 @@ import (
 type Store struct {
 	mu sync.RWMutex
 	data map[string]entry
+	hashes map[string]map[string]string
 }
 
 type entry struct {
@@ -18,6 +19,7 @@ type entry struct {
 func NewStore() *Store{
 	return &Store{
 		data: make(map[string]entry),
+		hashes: make(map[string]map[string]string),
 	}
 }
 
@@ -36,6 +38,7 @@ func (s *Store) Get(key string) (string,bool) {
 	return "",false
 
 }
+
 func (s *Store) Exists(keys ...string) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -53,6 +56,7 @@ func (s *Store) Exists(keys ...string) int {
 	}
 	return count
 }
+
 func (s *Store) Set(key string,val string,ttl time.Duration){
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -135,4 +139,70 @@ func (s *Store) StartActiveEviction(){
 			
 		}
 	}()
+}
+
+//for hashes
+
+func (s *Store) HSet(key ,field,val string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	hash, ok := s.hashes[key]
+	if !ok {
+    	hash = make(map[string]string)
+    	s.hashes[key] = hash
+	}
+
+	_, exists := hash[field]
+	hash[field] = val
+	if exists {
+		return 0
+	}
+	return 1
+}
+
+func (s *Store) HGet(key,field string) (string,bool){
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	val,ok := s.hashes[key]
+	if ok {
+		i,ok := val[field]
+		if ok{
+			return i,true
+		}else{
+			return "",false
+		}
+
+	}else{
+		return "",false
+	}
+}
+
+func (s *Store) HDel(key,field string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_,ok := s.hashes[key][field]
+	if ok {
+		delete(s.hashes[key],field)
+		return 1
+	}else{
+		return 0
+	}
+}
+
+func (s *Store) HGetAll(key string) map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	val,ok := s.hashes[key]
+
+	copy := make(map[string]string)
+	if !ok {
+		return copy
+	}
+	for k, v := range val {
+    	copy[k] = v
+	}
+	return copy	
 }

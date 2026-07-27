@@ -67,7 +67,7 @@ func handleConnection(conn net.Conn, kv *store.Store){
 				Str: "Err empty command",
 			})
 			continue
-		}
+		} 
 
 		cmd := strings.ToUpper(val.Array[0].String())
 		args := val.Array[1:]
@@ -201,12 +201,94 @@ func handleConnection(conn net.Conn, kv *store.Store){
 				Num : ttl,
 			})
 
-		default:
+		//for hashes
+		case "HSET":
+			if len(args) < 3{
+				writer.Write(protocol.Value{
+					Type:protocol.TypeError,
+					Str: "ERR wrong number of arguments in HSET command",
+				})
+				continue
+			}
+			key := args[0].String()
+			field := args[1].String()
+			val := args[2].String()
+
+			res := kv.HSet(key,field,val)
+			writer.Write(protocol.Value{
+				Type: protocol.TypeInteger,
+				Num: int64(res),
+				
+			})
+		case "HGET":
+			if len(args) < 2{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR wrong number of arguments for HGET command",
+				})
+				continue
+			}
+			key := args[0].String()
+			field := args[1].String()
+
+			val,ok := kv.HGet(key,field)
+			if ok{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeBulkString,
+					Bulk: []byte(val),
+				})
+			}else{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeBulkString,
+					IsNull: true,
+				})
+			}
+		case "HDEL":
+			if len(args) < 2 {
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str:  "ERR wrong number of arguments for HDEL command",
+				})
+				continue
+			}
+			key := args[0].String()
+			field := args[1].String()
+			count := kv.HDel(key, field)
+			writer.Write(protocol.Value{
+				Type: protocol.TypeInteger,
+				Num:  int64(count),
+			})
+		case "HGETALL":
+			if len(args) < 1 {
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str:  "ERR wrong number of arguments for HGETALL command",
+				})
+				continue
+			}
+
+			key := args[0].String()
+			mp := kv.HGetAll(key)
+
+			items := make([]protocol.Value, 0, len(mp)*2)
+			for k, v := range mp {
+				items = append(items, protocol.Value{
+					Type: protocol.TypeBulkString,
+					Bulk: []byte(k),
+				})
+				items = append(items, protocol.Value{
+					Type: protocol.TypeBulkString,
+					Bulk: []byte(v),
+				})
+			}
+			writer.Write(protocol.Value{
+				Type:  protocol.TypeArray,
+				Array: items,
+			})
 			writer.Write(protocol.Value{
 				Type: protocol.TypeArray,
 				Str: fmt.Sprintf("ERR unknown command %s",cmd),
 			})
-
 		}
 	
 
