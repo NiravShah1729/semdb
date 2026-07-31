@@ -12,10 +12,13 @@ import (
 
 	"github.com/NiravShah1729/semdb/protocol"
 	"github.com/NiravShah1729/semdb/store"
+	"github.com/NiravShah1729/semdb/embedding"
+
 )
 
 func main() {
 	kvStore := store.NewStore()
+	emb := embedding.NewLocalEmbedder("http://localhost:8000")
 	go kvStore.StartActiveEviction()
 
 	listener,err := net.Listen("tcp",":8080")
@@ -34,11 +37,11 @@ func main() {
 			log.Printf("Error accepting connection: %v",err)
 			continue
 		}
-		go handleConnection(conn,kvStore)
+		go handleConnection(conn,kvStore,emb)
 	}
 }
 
-func handleConnection(conn net.Conn, kv *store.Store){
+func handleConnection(conn net.Conn, kv *store.Store, emb embedding.Embedder){
 	defer conn.Close()
 
 	writer := protocol.NewWriter(conn)
@@ -291,6 +294,95 @@ func handleConnection(conn net.Conn, kv *store.Store){
 				Type:  protocol.TypeArray,
 				Array: items,
 			})
+		
+		//for semantic 
+		case "SETSEM":
+			if len(args) < 3{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR wrong number of arguments",
+				})
+				continue
+			}
+
+			key := args[0].String()
+			text := args[1].String()
+			value := args[2].String()
+
+			var ttl time.Duration
+			if len(args) >= 4 {
+				sec, err := strconv.Atoi(args[3].String())
+				if err != nil {
+					writer.Write(protocol.Value{
+						Type: protocol.TypeError,
+						Str:  "ERR invalid TTL value",
+					})
+					continue
+				}
+				ttl = time.Duration(sec) * time.Second
+			}
+
+			vector,err := emb.Embed(text)
+
+			if err != nil{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR creating the vectore embedding",
+				})
+				continue
+			}
+
+			kv.Semantic.Add(key, text, value, vector, ttl)
+
+			writer.Write(protocol.Value{
+				Type: protocol.TypeSimpleString,
+				Str: "OK",
+			})
+		case "GETSEM":
+			if len(args) < 1{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR wrong number of arguments",
+				})
+				continue
+			}
+			text := args[0].String()
+
+			threshold := float32(0.80)
+			if len(args) >= 2 {
+				parsed, err := strconv.ParseFloat(args[1].String(), 32)
+				if err != nil {
+					writer.Write(protocol.Value{
+						Type: protocol.TypeError,
+						Str:  "ERR invalid threshold value",
+					})
+					continue
+				}
+				threshold = float32(parsed)
+			}
+
+			vector,err := emb.Embed(text)
+			if err != nil {
+				writer.Write(protocol.Value{
+					Type: protocol.TypeError,
+					Str: "ERR create the vectore for the string",
+				})
+				continue
+			}
+
+			val,ok := kv.Semantic.Search(vector, threshold)
+			if !ok{
+				writer.Write(protocol.Value{
+					Type:protocol.TypeBulkString,
+					IsNull: true,
+				})
+			}else{
+				writer.Write(protocol.Value{
+					Type: protocol.TypeBulkString,
+					Bulk: []byte(val),
+				})
+			}
+
 		case "CONFIG", "COMMAND", "SELECT":
 			writer.Write(protocol.Value{
 				Type: protocol.TypeSimpleString,

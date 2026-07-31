@@ -15,6 +15,7 @@ type Shard struct {
 // Store represents the sharded in-memory key-value database.
 type Store struct {
 	shards [numShards]Shard
+	Semantic *SemanticStore
 }
 
 // entry holds a string value and an optional expiration timestamp.
@@ -25,7 +26,9 @@ type entry struct {
 
 // NewStore initializes and returns a Store with all 16 shards allocated.
 func NewStore() *Store {
-	s := &Store{}
+	s := &Store{
+		Semantic: NewSemanticStore(),
+	}
 	for i := 0; i < numShards; i++ {
 		s.shards[i].data = make(map[string]entry)
 		s.shards[i].hashes = make(map[string]map[string]string)
@@ -147,6 +150,7 @@ func (s *Store) deleteExpiredKeys() {
 		}
 		shard.mu.Unlock()
 	}
+	s.Semantic.DeleteExpiredKeys()
 }
 
 // StartActiveEviction launches a background goroutine to periodically clean up expired keys.
