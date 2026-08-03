@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +19,11 @@ import (
 
 func main() {
 	kvStore := store.NewStore()
-	emb := embedding.NewLocalEmbedder("http://localhost:8000")
+	url := os.Getenv("EMBEDDING_SERVICE_URL")
+	if url == "" {
+		url = "http://localhost:8000" // fallback for local dev without Docker
+	}
+	emb := embedding.NewLocalEmbedder(url)
 	go kvStore.StartActiveEviction()
 
 	listener,err := net.Listen("tcp",":8080")

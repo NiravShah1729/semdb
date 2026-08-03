@@ -1,3 +1,3 @@
 module github.com/NiravShah1729/semdb
 
-go 1.26.5
+go 1.22
